@@ -4,10 +4,12 @@ import json
 import tempfile
 import shutil
 import subprocess
+import uuid
+import asyncio
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'sandbox'))
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Response, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import anthropic
 from dotenv import load_dotenv
@@ -137,16 +139,13 @@ Output valid JSON only. No markdown, no explanation.
 Format:
 {
   "malware_type": "RANSOMWARE | DROPPER | LOADER | INFOSTEALER | RAT | DOWNLOADER | BACKDOOR",
-  "risk_score": integer 0-100,
-  "classification_confidence": integer 0-100,
-  "behavior_confidence": integer 0-100,
-  "findings": [
-    {"type": "critical", "label": "CRITICAL", "text": "short finding"},
-    {"type": "warn",     "label": "WARNING",  "text": "short finding"},
-    {"type": "ok",       "label": "INFO",     "text": "short finding"}
-  ],
-  "mitigations": ["① step", "② step", "③ step", "④ step", "⑤ step"],
-  "reasoning": "2-3 sentence technical explanation of the threat and kill chain"
+  "risk_score": 85,
+  "confidence": 0.9,
+  "executive_summary": "3 sentence technical explanation of the threat and kill chain",
+  "mitre_techniques": [{"id": "T1059", "name": "Command and Scripting Interpreter", "tactic": "Execution"}],
+  "iocs": ["list of IPs, domains, hashes"],
+  "yara_rule": "compact YARA rule string",
+  "action_plan": [{"priority": 1, "action": "immediate isolation step"}]
 }""",
         messages=[{
             "role": "user",
@@ -162,6 +161,17 @@ Format:
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
+
+job_queues = {}
+job_loops = {}
+
+@app.get("/")
+def root():
+    return {"message": "Welcome to the UseProtechtion Malware Analysis API"}
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(content=b"", media_type="image/x-icon")
 
 @app.get("/health")
 def health():
@@ -186,25 +196,50 @@ def build_sandbox_image():
     return {"status": "built"}
 
 
+@app.post("/upload")
 @app.post("/analyze")
-async def analyze(file: UploadFile = File(...)):
+async def analyze(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    job_id = str(uuid.uuid4())
+    job_queues[job_id] = asyncio.Queue()
+    job_loops[job_id] = asyncio.get_running_loop()
+
     suffix = f"_{file.filename}" if file.filename else ".bin"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
+
+    background_tasks.add_task(process_file, job_id, tmp_path, file.filename)
+    return {"job_id": job_id}
+
+def process_file(job_id: str, tmp_path: str, filename: str):
+    loop = job_loops.get(job_id)
+    queue = job_queues.get(job_id)
+
+    def emit(event_name: str, status: str, data=None, message=None):
+        if loop and queue:
+            payload = {"event": event_name, "status": status}
+            if data is not None:
+                payload["data"] = data
+            if message is not None:
+                payload["message"] = message
+            loop.call_soon_threadsafe(queue.put_nowait, payload)
 
     try:
         filename = file.filename or "sample"
         use_docker = docker_available() and image_built()
 
         # ── Static analysis ──────────────────────────────────────────────────
+        emit("static_analysis", "running")
         static_result = None
         if use_docker:
             static_result = run_static_in_docker(tmp_path)
         if static_result is None and analyze_file is not None:
             static_result = analyze_file(tmp_path)
         if static_result is None:
-            raise HTTPException(status_code=500, detail="Static analysis unavailable")
+            emit("error", "error", message="Static analysis unavailable")
+            return
+
+        emit("static_analysis", "complete", static_result)
 
         # ── Docker: JS dynamic analysis ──────────────────────────────────────
         dynamic_js = None
@@ -253,18 +288,41 @@ async def analyze(file: UploadFile = File(...)):
 
         ai_report = call_claude_report(file_meta)
 
-        return {
-            "static":     static_result,
-            "dynamic_js": dynamic_js,
-            "dynamic_pe": dynamic_pe,
-            "report":     ai_report,
+        result = {
+            "static_analysis": static_result,
+            "dynamic_js":      dynamic_js,
+            "dynamic_pe":      dynamic_pe,
+            "report":          ai_report,
         }
 
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"AI report parse error: {e}")
-    except HTTPException:
-        raise
+        emit("done", "complete", result)
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        emit("error", "error", message=str(e))
     finally:
-        os.unlink(tmp_path)
+        emit("close", "close")
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+@app.websocket("/ws/{job_id}")
+async def websocket_endpoint(websocket: WebSocket, job_id: str):
+    await websocket.accept()
+    queue = job_queues.get(job_id)
+    if not queue:
+        await websocket.send_json({"event": "error", "message": "Invalid job ID"})
+        await websocket.close()
+        return
+
+    try:
+        while True:
+            msg = await queue.get()
+            if msg["event"] == "close":
+                break
+            await websocket.send_json(msg)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        job_queues.pop(job_id, None)
+        job_loops.pop(job_id, None)
