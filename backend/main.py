@@ -28,6 +28,12 @@ try:
 except ImportError:
     ha_analyze = None
 
+try:
+    from pipeline import run_pipeline
+except ImportError as e:
+    print(f"Warning: could not import run_pipeline: {e}")
+    run_pipeline = None
+
 HA_API_KEY = os.getenv("HYBRID_ANALYSIS_API_KEY", "")
 
 app = FastAPI(title="UseProtechtion Malware Analysis API")
@@ -225,7 +231,7 @@ def process_file(job_id: str, tmp_path: str, filename: str):
             loop.call_soon_threadsafe(queue.put_nowait, payload)
 
     try:
-        filename = file.filename or "sample"
+        filename = filename or "sample"
         use_docker = docker_available() and image_built()
 
         # ── Static analysis ──────────────────────────────────────────────────
@@ -286,13 +292,73 @@ def process_file(job_id: str, tmp_path: str, filename: str):
             file_meta["pe_signatures"]      = [s["name"] for s in dynamic_pe.get("signatures", [])][:10]
             file_meta["pe_mitre"]           = dynamic_pe.get("mitre", [])[:10]
 
-        ai_report = call_claude_report(file_meta)
+        emit("pipeline_start", "running", message="AI agent pipeline starting...")
+
+        # ── 5-agent Claude pipeline with live streaming ───────────────────────
+        pipeline_result = {"report": {}}
+
+        def on_agent_event(name: str, status: str, data: dict = None):
+            emit(name, status, data or {})
+
+            # Stream each report stage as it's generated
+            if name == "report" and status == "done" and data:
+                report = data
+                stage_map = {
+                    1: {
+                        "malware_family":  report.get("malware_type", "UNKNOWN"),
+                        "verdict":         "MALICIOUS" if report.get("risk_score", 0) >= 60 else "SUSPICIOUS",
+                        "risk_score":      report.get("risk_score", 0),
+                        "severity":        "CRITICAL" if report.get("risk_score", 0) >= 80 else "HIGH",
+                        "confidence":      report.get("classification_confidence", 80) / 100,
+                        "one_line_summary": report.get("reasoning", "")[:120],
+                    },
+                    2: {
+                        "executive_summary": report.get("reasoning", ""),
+                        "affected_systems":  ["Windows hosts", "Corporate endpoints"],
+                        "business_impact":   "Credential theft and data exfiltration risk",
+                        "confidence":        report.get("behavior_confidence", 80) / 100,
+                    },
+                    3: {
+                        "mitre_techniques": [
+                            {"id": t.split(" ")[0], "name": " ".join(t.split(" ")[1:]), "tactic": "Execution", "description": ""}
+                            for t in (file_meta.get("mitre_techniques") or [])[:6]
+                        ],
+                        "iocs": {
+                            "domains": file_meta.get("domains_found", [])[:4],
+                            "ips":     file_meta.get("ips_found", [])[:4],
+                            "files":   file_meta.get("dropped_files", [])[:4],
+                            "registry_keys": [],
+                        },
+                        "attack_chain": report.get("reasoning", ""),
+                        "confidence": 0.88,
+                    },
+                    4: {
+                        "action_plan": [
+                            {"priority": i + 1, "action": m, "urgency": "immediate" if i == 0 else "24h"}
+                            for i, m in enumerate(report.get("mitigations", [])[:5])
+                        ],
+                        "yara_rule":                "",
+                        "iocs_to_block":            (file_meta.get("ips_found") or []) + (file_meta.get("urls_found") or []),
+                        "long_term_recommendations": report.get("mitigations", [])[3:6],
+                        "confidence": 0.85,
+                    },
+                }
+                for stage_num, stage_data in stage_map.items():
+                    emit("report_stage", "complete", stage_data, stage=stage_num)
+
+            if name == "report" and status == "done":
+                pipeline_result["report"] = data or {}
+
+        if run_pipeline:
+            run_pipeline(file_meta, on_event=on_agent_event)
+        else:
+            pipeline_result["report"] = call_claude_report(file_meta)
 
         result = {
             "static_analysis": static_result,
             "dynamic_js":      dynamic_js,
             "dynamic_pe":      dynamic_pe,
-            "report":          ai_report,
+            "report":          pipeline_result["report"],
         }
 
         emit("done", "complete", result)

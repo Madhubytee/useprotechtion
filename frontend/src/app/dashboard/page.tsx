@@ -6,6 +6,7 @@ import FileIntakePanel, { type FileInfo } from '@/components/FileIntakePanel';
 import BehavioralAnalysisPanel, {
   type AgentStatuses,
   type AgentStatus,
+  type StaticResult,
 } from '@/components/BehavioralAnalysisPanel';
 import ThreatReportPanel, {
   type ReportStages,
@@ -14,14 +15,12 @@ import ThreatReportPanel, {
   type Stage3Data,
   type Stage4Data,
 } from '@/components/ThreatReportPanel';
-
-import dynamic from 'next/dynamic';
-const SandboxSimulation = dynamic(() => import('@/components/SandboxSimulation'), { ssr: false });
-const LinuxSandboxPanel = dynamic(() => import('@/components/LinuxSandboxPanel'), { ssr: false });
+import SandboxSimulation from '@/components/SandboxSimulation';
+import LinuxSandboxPanel from '@/components/LinuxSandboxPanel';
+import { type Finding } from '@/lib/data';
 
 const STAGE_DURATIONS = [800, 1500, 2500, 1000, 2000, 800];
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-
 
 const INITIAL_AGENT_STATUSES: AgentStatuses = {
   ingestion:       { status: 'idle', detail: '' },
@@ -44,8 +43,8 @@ export default function Dashboard() {
   const [terminalLogs, setTerminalLogs] = useState<string[]>([
     '[system] MalwareScope initialized — awaiting specimen upload...',
   ]);
+  const [staticData, setStaticData] = useState<StaticResult | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
-  const staticData = null;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animDoneRef = useRef(false);
   const apiDoneRef = useRef(false);
@@ -112,6 +111,7 @@ export default function Dashboard() {
                 pushLog('[►] SANDBOX static analysis starting...');
               }
               if (event === 'static_analysis' && status === 'complete' && msg.data) {
+                setStaticData(msg.data as StaticResult);
                 const d = msg.data as Record<string, unknown>;
                 const entropy  = typeof d.entropy === 'number' ? d.entropy.toFixed(2) : '?';
                 const level    = d.threat_level as string ?? 'UNKNOWN';
