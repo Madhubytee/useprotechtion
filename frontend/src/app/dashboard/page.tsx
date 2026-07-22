@@ -44,7 +44,7 @@ export default function Dashboard() {
     '[system] MalwareScope initialized — awaiting specimen upload...',
   ]);
   const [staticData, setStaticData] = useState<StaticResult | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [dynamicJs, setDynamicJs] = useState<Record<string, unknown> | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animDoneRef = useRef(false);
   const apiDoneRef = useRef(false);
@@ -82,7 +82,6 @@ export default function Dashboard() {
           return r.json();
         })
         .then(({ job_id }: { job_id: string }) => {
-          setJobId(job_id);
           const wsBase = API_URL.replace(/^https?/, s => (s === 'https' ? 'wss' : 'ws'));
           const ws = new WebSocket(`${wsBase}/ws/${job_id}`);
 
@@ -205,6 +204,10 @@ export default function Dashboard() {
                   return { stage1: s1, stage2: s2, stage3: s3, stage4: s4 };
                 });
 
+                if (result.dynamic_js) {
+                  setDynamicJs(result.dynamic_js as Record<string, unknown>);
+                }
+
                 pushLog('[✓] Pipeline complete — full report available');
                 apiDoneRef.current = true;
                 tryFinish();
@@ -291,7 +294,7 @@ export default function Dashboard() {
         />
         <ThreatReportPanel stage1={reportStages.stage1} />
         <SandboxSimulation />
-        <LinuxSandboxPanel staticData={staticData} jobId={jobId} />
+        <LinuxSandboxPanel staticData={staticData} dynamicJs={dynamicJs} />
       </div>
     </>
   );

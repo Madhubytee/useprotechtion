@@ -260,10 +260,55 @@ function drawGraph(canvas: HTMLCanvasElement, gnodes: GNode[]) {
   }
 }
 
+// ── Build simulation steps from real dynamic_analyze.js output ────────────────
+function buildStepsFromDynamic(dyn: Record<string, unknown>): SimStep[] {
+  const steps: SimStep[] = [];
+  let t = 0;
+  const s = (line: string, tag: SimStep['tag'], node?: SimStep['node'], gap = 390) => {
+    steps.push({ delay: t, line, tag, node });
+    t += gap;
+  };
+
+  s('[SYSTEM] e2b sandbox — Ubuntu 22.04 LTS x86_64', 'sys', undefined, 240);
+  s('[SYSTEM] Mounting specimen → /home/user/malware.js', 'sys', undefined, 240);
+  s('[SYSTEM] Loading adaptive Windows API mock layer...', 'sys', undefined, 420);
+  s('[SYSTEM] node --require mock.js malware.js 2>&1', 'sys', undefined, 720);
+  s('[SYSTEM] Intercepting Windows API calls — live capture active', 'info', undefined, 780);
+
+  for (const obj of ((dyn.objects_created as string[] | undefined) ?? []).slice(0, 8)) {
+    s(`[MOCK ACTIVEX] Created: ${obj}`, 'warn', { type: 'ACTIVEX', label: obj.slice(0, 30) });
+  }
+
+  for (const cmd of ((dyn.shell_commands as Array<{op:string;cmd:string}> | undefined) ?? []).slice(0, 6)) {
+    const label = cmd.cmd.slice(0, 30);
+    s(`[MOCK PATCH] WScript.Shell.${cmd.op}: ${cmd.cmd.slice(0, 80)}`, 'crit', { type: 'EXEC', label });
+  }
+
+  for (const fop of ((dyn.file_ops as Array<{op:string;path?:string;preview?:string}> | undefined) ?? []).slice(0, 8)) {
+    const detail = fop.path ?? fop.preview ?? '';
+    const isCrit = ['DELETE_FILE','SAVE_TO_FILE','CREATE_TEXT_FILE','TEXT_WRITE'].includes(fop.op);
+    const nodeType = fop.op.includes('STREAM') ? 'STREAM' : 'FILE';
+    s(`[MOCK FS] ${fop.op}: ${detail.slice(0, 60)}`, isCrit ? 'crit' : 'warn', { type: nodeType, label: detail.slice(0, 28) });
+  }
+
+  for (const net of ((dyn.network as Array<{op:string;url?:string;method?:string}> | undefined) ?? []).slice(0, 5)) {
+    const dest = net.url ?? net.op;
+    s(`[MOCK NET] ${net.op}: ${dest}`, 'crit', { type: 'NETWORK', label: dest.slice(0, 28) });
+  }
+
+  for (const reg of ((dyn.registry as Array<{op:string;key:string}> | undefined) ?? []).slice(0, 6)) {
+    const isCrit = reg.op === 'REG_WRITE';
+    s(`[MOCK PATCH] WScript.Shell.${reg.op}: ${reg.key.slice(0, 60)}`, isCrit ? 'crit' : 'warn', { type: 'REGISTRY', label: reg.key.slice(0, 28) });
+  }
+
+  s('[SYSTEM] ── simulation complete — exit code 0 ──', 'info', undefined, 400);
+  return steps;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 interface Props {
   staticData?: StaticResult | null;
-  jobId?: string | null;
+  dynamicJs?: Record<string, unknown> | null;
 }
 
 const TAG_COLOR: Record<string, string> = {
@@ -273,9 +318,7 @@ const TAG_COLOR: Record<string, string> = {
   crit: '#f43f5e',
 };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-
-export default function LinuxSandboxPanel({ staticData, jobId }: Props) {
+export default function LinuxSandboxPanel({ staticData, dynamicJs }: Props) {
   const [running, setRunning]   = useState(false);
   const [done, setDone]         = useState(false);
   const [logs, setLogs]         = useState<Array<{ line: string; tag: string }>>([]);
@@ -307,10 +350,26 @@ export default function LinuxSandboxPanel({ staticData, jobId }: Props) {
     if (canvasRef.current) drawGraph(canvasRef.current, gnodes);
   }, [gnodes]);
 
+  // Auto-run when real dynamic data arrives from the sandbox
+  useEffect(() => {
+    if (dynamicJs) runSim();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dynamicJs]);
+
   // ── Handle patches file selection ──────────────────────────────────────────
+  const MAX_PATCHES_SIZE_BYTES = 2 * 1024 * 1024; // 2MB — this is a small JS mock-patch script, not the specimen itself
+
   function handlePatchesFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.js')) {
+      e.target.value = '';
+      return;
+    }
+    if (file.size > MAX_PATCHES_SIZE_BYTES) {
+      e.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (ev) => {
       setPatchesContent(ev.target?.result as string);
@@ -357,13 +416,15 @@ export default function LinuxSandboxPanel({ staticData, jobId }: Props) {
     }
   }
 
-  // ── Mode A: hardcoded / patches file simulation ────────────────────────────
+  // ── Mode A: hardcoded / patches file / real dynamic simulation ───────────────
   function runLocalSim(cx: number, cy: number) {
     const pc = patchesContentRef.current;
     const pn = patchesNameRef.current;
     const steps = pc && pn
       ? parsePatchesFile(pc, pn)
-      : buildSteps(staticData ?? null);
+      : dynamicJs
+        ? buildStepsFromDynamic(dynamicJs)
+        : buildSteps(staticData ?? null);
 
     steps.forEach((step, i) => {
       const timer = setTimeout(() => {
@@ -372,58 +433,6 @@ export default function LinuxSandboxPanel({ staticData, jobId }: Props) {
       }, step.delay);
       timersRef.current.push(timer);
     });
-  }
-
-  // ── Mode B: real e2b adaptive sandbox via backend WebSocket ───────────────
-  function runRealSandbox(cx: number, cy: number) {
-    fetch(`${API_URL}/sandbox/start/${jobId}`, { method: 'POST' })
-      .then(r => {
-        if (!r.ok) throw new Error(`Sandbox start failed: ${r.status}`);
-        return r.json();
-      })
-      .then(({ sandbox_job_id }: { sandbox_job_id: string }) => {
-        const wsBase = API_URL.replace(/^https?/, s => (s === 'https' ? 'wss' : 'ws'));
-        const ws = new WebSocket(`${wsBase}/ws/sandbox/${sandbox_job_id}`);
-
-        ws.onmessage = (ev) => {
-          try {
-            const msg = JSON.parse(ev.data as string) as Record<string, unknown>;
-
-            if (msg.event === 'sandbox_log') {
-              addLogNode(
-                msg.line as string,
-                (msg.tag as string) ?? 'info',
-                cx, cy,
-                msg.node as { type: string; label: string } | null ?? undefined,
-              );
-            }
-
-            if (msg.event === 'sandbox_patch') {
-              addLogNode(msg.line as string, 'info', cx, cy);
-            }
-
-            if (msg.event === 'sandbox_done' || msg.event === 'sandbox_error') {
-              if (msg.event === 'sandbox_done') {
-                const pf = msg.patch_file as string | null;
-                if (pf) addLogNode(`[SYSTEM] Patches saved → testing/${pf}`, 'info', cx, cy);
-              }
-              setRunning(false);
-              setDone(msg.event === 'sandbox_done');
-            }
-          } catch (e) {
-            console.error('[sandbox WS] parse error:', e);
-          }
-        };
-
-        ws.onerror = () => {
-          addLogNode('[ERROR] Sandbox WebSocket connection failed.', 'crit', cx, cy);
-          setRunning(false);
-        };
-      })
-      .catch(err => {
-        addLogNode(`[ERROR] ${err.message}`, 'crit', cx, cy);
-        setRunning(false);
-      });
   }
 
   // ── Entry point ────────────────────────────────────────────────────────────
@@ -438,21 +447,12 @@ export default function LinuxSandboxPanel({ staticData, jobId }: Props) {
     timersRef.current = [];
 
     const { cx, cy } = initCanvas();
-
-    // Priority: patches file → real sandbox (if jobId) → hardcoded fallback
-    if (patchesContentRef.current && patchesNameRef.current) {
-      runLocalSim(cx, cy);
-    } else if (jobId) {
-      runRealSandbox(cx, cy);
-    } else {
-      runLocalSim(cx, cy);
-    }
+    runLocalSim(cx, cy);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, staticData, jobId]);
+  }, [running, staticData, dynamicJs]);
 
   const nodeCount = gnodes.length > 0 ? gnodes.length - 1 : 0;
   const patchMode = !!patchesName;
-  const sandboxMode = !patchesName && !!jobId;  // real e2b mode
 
   return (
     <Panel title="// LINUX ADAPTIVE SANDBOX — e2b isolation" style={{ gridColumn: '1 / -1' }}>
@@ -492,18 +492,6 @@ export default function LinuxSandboxPanel({ staticData, jobId }: Props) {
               letterSpacing: 1,
             }}>
               PATCH MODE
-            </span>
-          )}
-          {sandboxMode && (
-            <span style={{
-              padding: '2px 7px',
-              border: '1px solid rgba(139,92,246,0.5)',
-              borderRadius: 3, fontSize: 8,
-              color: '#a78bfa',
-              fontFamily: 'JetBrains Mono, monospace',
-              letterSpacing: 1,
-            }}>
-              LIVE E2B
             </span>
           )}
         </div>
@@ -614,18 +602,6 @@ export default function LinuxSandboxPanel({ staticData, jobId }: Props) {
           fontSize: 9, color: '#78716c',
         }}>
           Patch shortcut loaded — replays mock behaviors from <span style={{ color: '#FFD700' }}>{patchesName}</span> without Gemini adaptive calls.
-        </div>
-      )}
-      {sandboxMode && !running && !done && (
-        <div style={{
-          marginBottom: 8, padding: '5px 10px',
-          background: 'rgba(139,92,246,0.04)',
-          border: '1px solid rgba(139,92,246,0.15)',
-          borderRadius: 4,
-          fontFamily: 'JetBrains Mono, monospace',
-          fontSize: 9, color: '#78716c',
-        }}>
-          Live mode — runs malware in real e2b Ubuntu sandbox, Gemini patches crashes iteratively. Patches saved to <span style={{ color: '#a78bfa' }}>testing/patches_&lt;timestamp&gt;.js</span>.
         </div>
       )}
 

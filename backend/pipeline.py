@@ -90,7 +90,7 @@ def enrich_with_virustotal(vt_json_path: str) -> dict:
 
 def run_ingestion(file_metadata: dict) -> dict:
     print("Running Ingestion Agent...")
-    return call_claude(
+    return _call_claude_timed(
         system_prompt="""You are a malware triage specialist.
         Given raw file metadata, structure it cleanly and flag anything suspicious.
         Output valid JSON only, no markdown, no explanation.
@@ -108,7 +108,7 @@ def run_ingestion(file_metadata: dict) -> dict:
 
 def run_static_analysis(ingestion_output: dict) -> dict:
     print("Running Static Analysis Agent...")
-    return call_claude(
+    return _call_claude_timed(
         system_prompt="""You are a malware analyst specializing in static analysis.
         Classify the malware type, explain behavior, identify obfuscation, assess severity.
         Output valid JSON only, no markdown, no explanation.
@@ -126,7 +126,7 @@ def run_static_analysis(ingestion_output: dict) -> dict:
 
 def run_mitre_mapping(ingestion_output: dict) -> dict:
     print("Running MITRE Mapping Agent...")
-    return call_claude(
+    return _call_claude_timed(
         system_prompt="""You are a MITRE ATT&CK framework specialist.
         Map behaviors to the most specific ATT&CK technique IDs possible.
         Output valid JSON only, no markdown, no explanation.
@@ -147,7 +147,7 @@ def run_mitre_mapping(ingestion_output: dict) -> dict:
 
 def run_remediation(static_output: dict, mitre_output: dict, attempt: int = 1) -> dict:
     print(f"🛡️ Running Remediation Agent (attempt {attempt})...")
-    result = call_claude(
+    result = _call_claude_timed(
         system_prompt="""You are a cybersecurity incident responder.
         Given malware analysis and MITRE techniques, provide:
         1. A YARA detection rule

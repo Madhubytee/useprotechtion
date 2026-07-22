@@ -17,12 +17,33 @@ interface Props {
   fileInfo: FileInfo | null;
 }
 
+// Max specimen size accepted by the backend sandbox intake (50MB).
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+// Extensions this analysis pipeline is built to accept.
+const ALLOWED_EXTENSIONS = ['EXE', 'DLL', 'BAT', 'PS1', 'MSI', 'JS', 'VBS', 'SCR', 'CMD', 'ZIP'];
+
 export default function FileIntakePanel({ onFileLoaded, onAnalyze, analysisRunning, fileInfo }: Props) {
   const [dragOver, setDragOver] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function processFile(f: File) {
     const ext = f.name.split('.').pop()?.toUpperCase() ?? 'UNK';
+
+    if (f.size === 0) {
+      setError('File is empty.');
+      return;
+    }
+    if (f.size > MAX_FILE_SIZE_BYTES) {
+      setError(`File exceeds max size of ${MAX_FILE_SIZE_BYTES / (1024 * 1024)}MB.`);
+      return;
+    }
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      setError(`Unsupported file type ".${ext}". Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`);
+      return;
+    }
+
+    setError(null);
     const sizeKb = Math.round(f.size / 1024) || 1;
     onFileLoaded({ name: f.name, sizeKb, ext, file: f });
   }
@@ -37,6 +58,8 @@ export default function FileIntakePanel({ onFileLoaded, onAnalyze, analysisRunni
   function handleChange(ev: React.ChangeEvent<HTMLInputElement>) {
     const f = ev.target.files?.[0];
     if (f) processFile(f);
+    // Reset so selecting the same file again still fires onChange.
+    ev.target.value = '';
   }
 
   function loadDemo() {
@@ -66,6 +89,12 @@ export default function FileIntakePanel({ onFileLoaded, onAnalyze, analysisRunni
         <div className="upload-subtext">.EXE · .DLL · .BAT · .PS1 · .MSI</div>
       </div>
       <input ref={inputRef} type="file" style={{ display: 'none' }} onChange={handleChange} />
+
+      {error && (
+        <div className="f9" style={{ color: 'var(--rose, #f43f5e)', marginTop: 8, wordBreak: 'break-word' }}>
+          ⚠ {error}
+        </div>
+      )}
 
       {fileInfo && (
         <>

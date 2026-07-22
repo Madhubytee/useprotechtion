@@ -2,7 +2,6 @@ import sys
 import os
 import json
 import tempfile
-import shutil
 import subprocess
 import uuid
 import asyncio
@@ -50,6 +49,9 @@ client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 SANDBOX_IMAGE = "useprotection-sandbox"
 SANDBOX_DIR   = os.path.join(os.path.dirname(__file__), '..', 'sandbox')
+
+# Reject absurdly large uploads before they hit disk/analysis.
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 
 
 # ── Docker dynamic analysis ────────────────────────────────────────────────────
@@ -211,7 +213,17 @@ async def analyze(background_tasks: BackgroundTasks, file: UploadFile = File(...
 
     suffix = f"_{file.filename}" if file.filename else ".bin"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        shutil.copyfileobj(file.file, tmp)
+        total = 0
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                tmp.close()
+                os.unlink(tmp.name)
+                raise HTTPException(status_code=413, detail="File too large")
+            tmp.write(chunk)
         tmp_path = tmp.name
 
     background_tasks.add_task(process_file, job_id, tmp_path, file.filename)
@@ -300,8 +312,15 @@ def process_file(job_id: str, tmp_path: str, filename: str):
         def on_agent_event(name: str, status: str, data: dict = None):
             emit(name, status, data or {})
 
-            # Stream each report stage as it's generated
-            if name == "report" and status == "done" and data:
+            # Stream each report stage as it's generated.
+            # NOTE: pipeline.run_pipeline() emits the terminal report event with
+            # status="complete" (not "done") — matched here so this block (and
+            # pipeline_result["report"] below) actually fires. The stage_map
+            # field names (classification_confidence, behavior_confidence,
+            # reasoning, mitigations) assume a report schema that doesn't match
+            # pipeline.py's combined_report (stage1..stage4 + flat fields) —
+            # left as-is since reconciling it is a business-logic decision.
+            if name == "report" and status == "complete" and data:
                 report = data
                 stage_map = {
                     1: {
@@ -346,11 +365,18 @@ def process_file(job_id: str, tmp_path: str, filename: str):
                 for stage_num, stage_data in stage_map.items():
                     emit("report_stage", "complete", stage_data, stage=stage_num)
 
-            if name == "report" and status == "done":
+            if name == "report" and status == "complete":
                 pipeline_result["report"] = data or {}
 
         if run_pipeline:
-            run_pipeline(file_meta, on_event=on_agent_event)
+            # pipeline.run_pipeline() takes progress_cb(event_dict) — not
+            # on_event(name, status, data). Adapt so on_agent_event (which
+            # expects the 3-arg form) still gets called correctly instead of
+            # raising TypeError on every run.
+            def _progress_cb(event: dict) -> None:
+                on_agent_event(event.get("event"), event.get("status"), event.get("data"))
+
+            run_pipeline(file_meta, progress_cb=_progress_cb)
         else:
             pipeline_result["report"] = call_claude_report(file_meta)
 

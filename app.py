@@ -92,17 +92,25 @@ except Exception as _e2b_import_err:
 # Path to optional VirusTotal behavior dump — present during demos
 _VT_PATH = Path(__file__).parent / "malware_behavior.json"
 
+# Reject absurdly large uploads before they hit disk/analysis (malware samples
+# are almost always well under this; adjust if legitimate samples are bigger).
+_MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
+
 # ── Frontend paths ────────────────────────────────────────────────────────────
 _OUT = Path(__file__).parent / "frontend" / "out"
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="UseProtection API", docs_url="/api/docs")
 
-# CORS — allow the Next.js dev server (port 3000) during development
+# CORS — allow the Next.js dev server (port 3000) during development.
+# NOTE: allow_origins=["*"] together with allow_credentials=True is rejected by
+# browsers (and is an overly-permissive config for an app that accepts
+# untrusted file uploads), so credentials are disabled while origins stay
+# wildcarded. Restrict allow_origins to the real deployment origin(s) in prod.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -381,8 +389,14 @@ async def upload_file(file: UploadFile):
     """Accept a suspicious file, start the analysis pipeline, return a job_id."""
     job_id = str(uuid.uuid4())
     suffix = Path(file.filename or "upload.bin").suffix or ".bin"
+
+    contents = await file.read()
+    if len(contents) > _MAX_UPLOAD_BYTES:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=413, detail="File too large")
+
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(await file.read())
+        tmp.write(contents)
         tmp_path = tmp.name
 
     _jobs[job_id] = queue.Queue()
@@ -499,8 +513,11 @@ async def root():
 # Falls back to 404.html for unknown paths.
 @app.get("/{full_path:path}", include_in_schema=False)
 async def static_fallback(full_path: str):
-    candidate = _OUT / full_path
-    if candidate.is_file():
+    # Resolve and verify the candidate stays inside _OUT to prevent path
+    # traversal via "../" segments in full_path (e.g. /../../etc/passwd).
+    out_root = _OUT.resolve()
+    candidate = (out_root / full_path).resolve()
+    if candidate.is_file() and out_root in candidate.parents:
         return FileResponse(str(candidate))
     not_found = _OUT / "404.html"
     if not_found.exists():

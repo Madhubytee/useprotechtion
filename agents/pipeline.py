@@ -44,7 +44,7 @@ def _call_claude_timed(system_prompt: str, user_message: str,
     so the pipeline can continue with partial data rather than hanging indefinitely.
     """
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        fut = ex.submit(call_claude, system_prompt, user_message, max_tokens)
+        fut = ex.submit(call_claude, system_prompt, user_message, timeout=timeout, max_tokens=max_tokens)
         try:
             return fut.result(timeout=timeout)
         except concurrent.futures.TimeoutError:
