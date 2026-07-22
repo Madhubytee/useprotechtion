@@ -106,22 +106,54 @@ export default function Home() {
           Detonate suspicious files in an isolated sandbox. Get instant MITRE ATT&CK mapping, behavioral analysis, and AI-generated threat reports.
         </p>
 
-        {/* CTA — single centered button */}
-        <Link href="/dashboard" style={{
-          fontFamily: 'Orbitron, monospace',
-          fontSize: '10px',
-          letterSpacing: '2px',
-          textTransform: 'uppercase',
-          color: '#ffffff',
-          background: '#3b82f6',
-          border: '1px solid #3b82f6',
-          borderRadius: '8px',
-          padding: '14px 48px',
-          textDecoration: 'none',
-          boxShadow: '0 0 24px rgba(59,130,246,0.35)',
+        {/* CTA row — wraps on narrow screens */}
+        <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <Link href="/dashboard" style={{
+            fontFamily: 'Orbitron, monospace',
+            fontSize: '10px',
+            letterSpacing: '2px',
+            textTransform: 'uppercase',
+            color: '#ffffff',
+            background: '#3b82f6',
+            border: '1px solid #3b82f6',
+            borderRadius: '8px',
+            padding: '14px 48px',
+            textDecoration: 'none',
+            boxShadow: '0 0 24px rgba(59,130,246,0.35)',
+          }}>
+            Dashboard
+          </Link>
+
+          <Link href="/dashboard?sample=demo_not_a_virus.js" style={{
+            fontFamily: 'Orbitron, monospace',
+            fontSize: '10px',
+            letterSpacing: '2px',
+            textTransform: 'uppercase',
+            color: '#3b82f6',
+            background: 'transparent',
+            border: '1px solid rgba(59,130,246,0.5)',
+            borderRadius: '8px',
+            padding: '14px 32px',
+            textDecoration: 'none',
+          }}>
+            Try Safe Demo File
+          </Link>
+        </div>
+
+        {/* Explicit safety disclosure for the demo file link above */}
+        <p style={{
+          fontSize: '12px',
+          color: '#64748b',
+          maxWidth: '480px',
+          lineHeight: 1.6,
+          marginTop: '14px',
         }}>
-          Dashboard
-        </Link>
+          "Try Safe Demo File" loads a synthetic sample that only contains fake,
+          made-up indicators (test IP ranges, placeholder keys, mentions of
+          suspicious function names). It is <strong style={{ color: '#94a3b8' }}>not real malware</strong> and
+          is completely safe to download and analyze — it exists so you can see
+          how the pipeline works without needing an actual malicious file.
+        </p>
 
         {/* Stats row */}
         <div style={{ display: 'flex', gap: '48px', marginTop: '80px', flexWrap: 'wrap', justifyContent: 'center' }}>

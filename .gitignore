@@ -48,6 +48,13 @@ samples/
 output/
 results/
 
+# Safe synthetic demo files served by /samples and /results for the
+# "try it without a real virus" flow — not real malware or real VT output.
+!testing/samples/
+!testing/samples/demo_not_a_virus.js
+!testing/results/
+!testing/results/demo_vt_log.json
+
 # Docker
 .dockerignore
 

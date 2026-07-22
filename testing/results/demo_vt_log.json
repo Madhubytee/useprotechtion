@@ -1,0 +1,31 @@
+{
+  "_notice": "DEMO DATA — synthetic example, not a real VirusTotal report. Pairs with testing/samples/demo_not_a_virus.js for demonstration purposes only.",
+  "data": {
+    "verdict_labels": ["USEPROTECHTION_DEMO_NOT_REAL"],
+    "mitre_attack_techniques": [
+      {
+        "id": "T1059.001",
+        "signature_description": "(DEMO) Simulated PowerShell execution indicator",
+        "severity": "IMPACT_SEVERITY_MEDIUM"
+      },
+      {
+        "id": "T1140",
+        "signature_description": "(DEMO) Simulated base64 decode/deobfuscation indicator",
+        "severity": "IMPACT_SEVERITY_LOW"
+      }
+    ],
+    "dns_lookups": [
+      { "hostname": "example.com" }
+    ],
+    "ip_traffic": [
+      { "destination_ip": "192.0.2.10" }
+    ],
+    "processes_created": [
+      "(DEMO) powershell.exe -NoP -NonI -W Hidden -Enc <fake-demo-payload-not-real>"
+    ],
+    "registry_keys_set": [
+      { "key": "HKCU\\Software\\UseProtechtionDemo\\NotReal" }
+    ],
+    "files_dropped": []
+  }
+}

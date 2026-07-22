@@ -42,6 +42,13 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+# Force UTF-8 stdout/stderr — Windows defaults to the legacy console codepage,
+# which crashes on any print() containing non-ASCII text (arrows, emoji, or
+# arbitrary Unicode in AI-generated report content).
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, Request, UploadFile, WebSocket, WebSocketDisconnect

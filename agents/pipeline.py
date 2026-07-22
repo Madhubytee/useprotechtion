@@ -360,13 +360,13 @@ def run_pipeline(file_metadata: dict, progress_cb=None, vt_data: dict | None = N
             if data is not None:
                 payload["data"] = data
             progress_cb(payload)
-            print(f"[pipeline→queue] event={event!r} status={status!r}")
+            print(f"[pipeline->queue] event={event!r} status={status!r}")
 
     def emit_stage(stage_num: int, data: dict):
         if progress_cb:
             progress_cb({"event": "report_stage", "stage": stage_num,
                          "status": "complete", "data": data})
-            print(f"[pipeline→queue] event='report_stage' stage={stage_num}")
+            print(f"[pipeline->queue] event='report_stage' stage={stage_num}")
 
     print("Starting MalwareScope Pipeline...")
     print("=" * 50)
