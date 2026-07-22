@@ -310,7 +310,7 @@ export default function FileIntakePanel({ onFileLoaded, onAnalyze, analysisRunni
               overflow: 'hidden',
             }}>
               <div className="f9" style={{ padding: '6px 10px', color: '#64748b', borderBottom: '1px solid rgba(0,245,255,0.08)' }}>
-                These are synthetic demo samples — not real malware, safe to load.
+                These are synthetic demo samples, not real malware, safe to load.
               </div>
               {samples.map(name => (
                 <button

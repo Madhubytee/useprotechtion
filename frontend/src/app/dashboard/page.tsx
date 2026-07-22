@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import Header from '@/components/Header';
 import FileIntakePanel, { type FileInfo } from '@/components/FileIntakePanel';
 import BehavioralAnalysisPanel, {
@@ -53,30 +53,6 @@ export default function Dashboard() {
   function pushLog(line: string) {
     setTerminalLogs(prev => [...prev, line]);
   }
-
-  // Auto-load a demo sample when arriving via /dashboard?sample=<filename>
-  // (used by the home page's "Try the safe demo file" link).
-  useEffect(() => {
-    const sampleName = new URLSearchParams(window.location.search).get('sample');
-    if (!sampleName) return;
-
-    fetch(`${API_URL}/samples/${encodeURIComponent(sampleName)}`)
-      .then(r => {
-        if (!r.ok) throw new Error(`Sample fetch failed: ${r.status}`);
-        return r.blob();
-      })
-      .then(blob => {
-        const file = new File([blob], sampleName, { type: blob.type || 'text/plain' });
-        const sizeKb = Math.round(file.size / 1024) || 1;
-        const ext = sampleName.split('.').pop()?.toUpperCase() ?? 'UNK';
-        setFileInfo({ name: sampleName, sizeKb, ext, file, mode: 'malware' });
-        pushLog(`[system] Loaded safe demo sample "${sampleName}" — not real malware, click Initiate Analysis to run it.`);
-      })
-      .catch(err => {
-        pushLog(`[CRIT] Could not load demo sample: ${String(err)}`);
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function tryFinish() {
     if (animDoneRef.current && apiDoneRef.current) {

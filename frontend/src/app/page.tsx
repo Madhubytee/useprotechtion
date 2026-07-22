@@ -5,6 +5,8 @@ import dynamic from 'next/dynamic';
 
 const FloatingLines = dynamic(() => import('@/components/FloatingLines'), { ssr: false });
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+
 export default function Home() {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
@@ -36,7 +38,7 @@ export default function Home() {
         backdropFilter: 'blur(12px)',
         position: 'sticky',
         top: 0,
-        zIndex: 200,
+        zIndex: 300,
       }}>
         <div style={{
           fontFamily: 'Orbitron, monospace',
@@ -106,7 +108,7 @@ export default function Home() {
           Detonate suspicious files in an isolated sandbox. Get instant MITRE ATT&CK mapping, behavioral analysis, and AI-generated threat reports.
         </p>
 
-        {/* CTA row — wraps on narrow screens */}
+        {/* CTA row, wraps on narrow screens */}
         <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', justifyContent: 'center' }}>
           <Link href="/dashboard" style={{
             fontFamily: 'Orbitron, monospace',
@@ -124,7 +126,7 @@ export default function Home() {
             Dashboard
           </Link>
 
-          <Link href="/dashboard?sample=demo_not_a_virus.js" style={{
+          <a href={`${API_URL}/samples/demo_not_a_virus.js`} download="demo_not_a_virus.js" style={{
             fontFamily: 'Orbitron, monospace',
             fontSize: '10px',
             letterSpacing: '2px',
@@ -136,8 +138,8 @@ export default function Home() {
             padding: '14px 32px',
             textDecoration: 'none',
           }}>
-            Try Safe Demo File
-          </Link>
+            Download Safe Demo File
+          </a>
         </div>
 
         {/* Explicit safety disclosure for the demo file link above */}
@@ -148,11 +150,12 @@ export default function Home() {
           lineHeight: 1.6,
           marginTop: '14px',
         }}>
-          "Try Safe Demo File" loads a synthetic sample that only contains fake,
-          made-up indicators (test IP ranges, placeholder keys, mentions of
-          suspicious function names). It is <strong style={{ color: '#94a3b8' }}>not real malware</strong> and
-          is completely safe to download and analyze — it exists so you can see
-          how the pipeline works without needing an actual malicious file.
+          "Download Safe Demo File" downloads a synthetic sample to your device
+          that only contains fake, made-up indicators (test IP ranges,
+          placeholder keys, mentions of suspicious function names). It is{' '}
+          <strong style={{ color: '#94a3b8' }}>not real malware</strong>, is completely
+          safe to open or upload, and exists so you can try the pipeline on
+          the Dashboard page without needing an actual malicious file.
         </p>
 
         {/* Stats row */}
