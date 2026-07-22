@@ -40,10 +40,13 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 # ── Environment ──────────────────────────────────────────────────────────────
 # Load root .env first, then agents/.env so the Anthropic key is available
@@ -101,6 +104,12 @@ _OUT = Path(__file__).parent / "frontend" / "out"
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="UseProtection API", docs_url="/api/docs")
+
+# Rate limiting — per-IP, since /upload and /sandbox/start each trigger costly
+# Anthropic/Gemini/e2b API calls and unlimited background threads.
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS — allow the Next.js dev server (port 3000) during development.
 # NOTE: allow_origins=["*"] together with allow_credentials=True is rejected by
@@ -385,7 +394,8 @@ def _run_sandbox_job(sandbox_job_id: str, filepath: str, main_job_id: str) -> No
 
 # ── API routes ────────────────────────────────────────────────────────────────
 @app.post("/upload")
-async def upload_file(file: UploadFile):
+@limiter.limit("5/minute")
+async def upload_file(request: Request, file: UploadFile):
     """Accept a suspicious file, start the analysis pipeline, return a job_id."""
     job_id = str(uuid.uuid4())
     suffix = Path(file.filename or "upload.bin").suffix or ".bin"
@@ -440,7 +450,8 @@ async def websocket_endpoint(websocket: WebSocket, job_id: str) -> None:
 
 
 @app.post("/sandbox/start/{job_id}")
-async def sandbox_start(job_id: str):
+@limiter.limit("3/minute")
+async def sandbox_start(request: Request, job_id: str):
     """Start an adaptive e2b sandbox run for a previously uploaded file."""
     filepath = _sandbox_files.get(job_id)
     if not filepath or not Path(filepath).exists():
