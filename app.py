@@ -606,7 +606,7 @@ async def health():
 
 
 @app.post("/upload")
-@limiter.limit("5/minute")
+@limiter.limit("3/day")
 async def upload_file(
     request: Request,
     file: UploadFile,
@@ -788,7 +788,7 @@ async def sandbox_run_patch(job_id: str, patch: UploadFile):
 
 
 @app.post("/sandbox/start/{job_id}")
-@limiter.limit("3/minute")
+@limiter.limit("3/day")
 async def sandbox_start(request: Request, job_id: str):
     """Start an adaptive e2b sandbox run for a previously uploaded file."""
     filepath = _sandbox_files.get(job_id)
