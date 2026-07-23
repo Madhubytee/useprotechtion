@@ -55,9 +55,6 @@ results/
 !testing/results/
 !testing/results/demo_vt_log.json
 
-# Docker
-.dockerignore
-
 # IDE
 .vscode/
 .idea/
